@@ -14,7 +14,6 @@ workflows:
     scripts:
       - name: Git LFS pull
         script: |
-          git lfs install
           git lfs pull
 
       - name: Grant executable permissions
@@ -34,34 +33,42 @@ workflows:
             -e 's/PROVISIONING_PROFILE_SPECIFIER = [^;]*;/PROVISIONING_PROFILE_SPECIFIER = "";/g' \
             "$XCODE_PROJECT/project.pbxproj"
 
-      - name: Build Xcode archive (Unsigned)
+      - name: Fast Build Xcode (Skip dSYM & Indexing)
         script: |
-          xcodebuild archive \
+          # Tối ưu tốc độ tối đa:
+          # 1. COMPILER_INDEX_STORE_ENABLE=NO: Bỏ qua lập chỉ mục mã nguồn
+          # 2. DEBUG_INFORMATION_FORMAT=dwarf: Bỏ qua tạo file dSYM cho file thư viện 450MB
+          # 3. GCC_GENERATE_DEBUGGING_SYMBOLS=NO: Tắt sinh symbols debug
+          # 4. Build trực tiếp tạo .app (nhanh hơn archive)
+          xcodebuild build \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath "build/Unity-iPhone.xcarchive" \
+            -derivedDataPath "build/DerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            GCC_GENERATE_DEBUGGING_SYMBOLS=NO
 
-      - name: Package Unsigned IPA
+      - name: Fast Package Unsigned IPA
         script: |
-          APP_PATH=$(find build/Unity-iPhone.xcarchive -name "*.app" | head -1)
+          APP_PATH=$(find build/DerivedData/Build/Products -name "*.app" | head -1)
           if [ -z "$APP_PATH" ]; then
-            echo "ERROR: Không tìm thấy file .app trong xcarchive!"
+            echo "ERROR: Không tìm thấy file .app!"
             exit 1
           fi
           echo "Found app at: $APP_PATH"
           mkdir -p build/Payload
           cp -r "$APP_PATH" build/Payload/
           cd build
-          zip -r -9 Unity-iPhone-unsigned.ipa Payload
+          # Nén nhanh cấp độ 1 (-1) thay vì nén tối đa (-9) giúp tiết kiệm 1-2 phút
+          zip -q -r -1 Unity-iPhone-unsigned.ipa Payload
           ls -lh Unity-iPhone-unsigned.ipa
 
     artifacts:
       - build/*.ipa
-      - build/Unity-iPhone.xcarchive
